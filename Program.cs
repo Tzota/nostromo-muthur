@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using nostromo_muthur.Domain.Messages;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Extensions.Polling;
@@ -11,15 +12,24 @@ namespace nostromo_muthur
 {
     class Program
     {
-        static ITelegramBotClient botClient;
+        static ITelegramBotClient? botClient;
+        static Redis.Client? redisClient;
 
         public static async Task Main(string[] args)
         {
-            string botId = Environment.GetEnvironmentVariable("BOT_ID");
+            string? botId = Environment.GetEnvironmentVariable("BOT_ID");
             if (String.IsNullOrEmpty(botId))
             {
                 throw new InvalidOperationException("Need BOT_ID with bot id");
             }
+
+            string? redisServer = Environment.GetEnvironmentVariable("REDIS_SERVER");
+            if (String.IsNullOrEmpty(redisServer))
+            {
+                throw new InvalidOperationException("Need REDIS_SERVER with redis host");
+            }
+
+            redisClient = new Redis.Client(redisServer);
 
             botClient = new TelegramBotClient(botId);
             var me = await botClient.GetMeAsync();
@@ -34,10 +44,15 @@ namespace nostromo_muthur
             );
 
             Console.WriteLine($"Start listening for @{me.Username}");
-            Console.ReadLine();
 
-            // Send cancellation request to stop bot
-            cts.Cancel();
+            while (true)
+            {
+                System.Threading.Thread.Sleep(Int32.MaxValue);
+            }
+            // Console.ReadLine();
+            // Console.WriteLine("Bye-bye");
+            // // Send cancellation request to stop bot
+            // cts.Cancel();
         }
 
         public static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
@@ -71,23 +86,24 @@ namespace nostromo_muthur
         // static async void Bot_OnMessage(object sender, MessageEventArgs e)
         private static async Task BotOnMessageReceived(Message message)
         {
-            if (message.Text != null)
-            {
-                Console.WriteLine($"Received a text message in chat {message.Chat.Id}.");
-                string text = "You said:\n" + message.Text;
-                if (message.Text == "/t" || message.Text == "/t@MUTHUR6000Bot")
-                {
-                    text = new Redis.Client().ReadOne();
-                }
-                else
-                {
+            if (redisClient == null) throw new InvalidOperationException(nameof(redisClient));
+            if (botClient == null) throw new InvalidOperationException(nameof(botClient));
+            if (message.Text == null) return;
 
-                }
-                await botClient.SendTextMessageAsync(
-                    chatId: message.Chat,
-                    text
-                );
+            Console.WriteLine($"Received a text message in chat {message.Chat.Id}.");
+            string text = "You said:\n" + message.Text;
+            if (message.Text == "/t" || message.Text == "/t@MUTHUR6000Bot")
+            {
+                Redis.Message m = redisClient.ReadLast();
+                AbstractMessage am = AbstractMessage.Create(m);
+                text = am.ToString();
             }
+
+            await botClient.SendTextMessageAsync(
+                chatId: message.Chat,
+                text,
+                ParseMode.Html
+            );
         }
         private static async Task UnknownUpdateHandlerAsync(Update update)
         {
